@@ -5,6 +5,9 @@ A simple command-line tool for text-to-speech using OpenAI's API, featuring real
 ## Installation
 
 ```bash
+uv tool install -U wiz-tts
+
+# or if you prefer pip
 pip install wiz-tts
 ```
 
