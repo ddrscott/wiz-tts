@@ -1,107 +1,51 @@
 import asyncio
 import argparse
-import numpy as np
 import sys
-from scipy.fftpack import fft
-import sounddevice as sd
-from typing import Any, Optional, List
+import signal
+from typing import Optional
 
 from rich.console import Console
 from rich.status import Status
 
-from openai import AsyncOpenAI
+from wiz_tts.tts import TextToSpeech
+from wiz_tts.audio import AudioPlayer
 
 console = Console()
-openai = AsyncOpenAI()
+audio_player = None
 
-# Constants for audio processing
-SAMPLE_RATE = 24000  # OpenAI's PCM format is 24kHz
-CHUNK_SIZE = 4800  # 200ms chunks for visualization (5 updates per second)
-
-def generate_histogram(fft_values: np.ndarray, width: int = 12) -> str:
-    """Generate a text-based histogram from FFT values."""
-    # Use lower frequencies (more interesting for speech)
-    fft_values = np.abs(fft_values[:len(fft_values)//4])
-
-    # Group the FFT values into bins
-    bins = np.array_split(fft_values, width)
-    bin_means = [np.mean(bin) for bin in bins]
-
-    # Normalize values
-    max_val = max(bin_means) if any(bin_means) else 1.0
-    # Handle potential NaN values by replacing them with 0.0
-    normalized = [min(val / max_val, 1.0) if not np.isnan(val) else 0.0 for val in bin_means]
-
-    # Create histogram bars using Unicode block characters
-    bars = ""
-    for val in normalized:
-        # Check for NaN values before converting to int
-        if np.isnan(val):
-            height = 0
-        else:
-            height = int(val * 8)  # 8 possible heights with Unicode blocks
-
-        if height == 0:
-            bars += " "
-        else:
-            # Unicode block elements from 1/8 to full block
-            blocks = [" ", "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"]
-            bars += blocks[height]
-
-    return bars
+def signal_handler(sig, frame):
+    """Handle Ctrl+C by stopping audio playback."""
+    global audio_player
+    if audio_player:
+        console.print("\n[bold red]Playback interrupted![/]")
+        audio_player.stop()
+    sys.exit(0)
 
 async def async_main(text: str, voice: str = "coral", instructions: str = "", model: str = "tts-1") -> None:
     """Main function to handle TTS generation and playback."""
+    global audio_player
 
     console.print(f"Generating speech with {model}, voice: {voice}...")
 
-    # Setup the output stream before getting data
-    stream = sd.RawOutputStream(
-        samplerate=SAMPLE_RATE,
-        channels=1,
-        dtype='int16',
-    )
+    # Initialize services
+    tts = TextToSpeech()
+    audio_player = AudioPlayer()
+    audio_player.start()
 
-    stream.start()
+    try:
+        with console.status("Playing...") as status:
+            async for chunk in tts.generate_speech(text, voice, instructions, model):
+                # Process chunk and get visualization data
+                viz_data = audio_player.play_chunk(chunk)
 
-    # Buffer to store small chunks for FFT analysis
-    audio_buffer = []
-    chunk_counter = 0
+                # Update display if visualization data is available
+                if viz_data:
+                    status.update(f"[{viz_data['counter']}] ▶ {viz_data['histogram']}")
 
-    with console.status("Playing...") as status:
-        async with openai.audio.speech.with_streaming_response.create(
-            model=model,
-            voice=voice,
-            input=text,
-            instructions=instructions,
-            response_format="pcm",
-        ) as response:
-            # Stream chunks directly to audio output
-            async for chunk in response.iter_bytes(1024):  # Use smaller chunks for lower latency
-                # Write directly to sound device
-                stream.write(chunk)
-
-                # Store for visualization
-                chunk_data = np.frombuffer(chunk, dtype=np.int16)
-                audio_buffer.extend(chunk_data)
-
-                # When we have enough data for FFT analysis
-                if len(audio_buffer) >= CHUNK_SIZE:
-                    # Calculate FFT on current chunk
-                    fft_result = fft(audio_buffer[:CHUNK_SIZE])
-                    histogram = generate_histogram(fft_result)
-
-                    # Update display
-                    chunk_counter += 1
-                    status.update(f"[{chunk_counter}] ▶ {histogram}")
-
-                    # Keep only the newest data
-                    audio_buffer = audio_buffer[CHUNK_SIZE:]
-
-    # Close the stream after playback finishes
-    stream.stop()
-    stream.close()
-    console.print("Playback complete!")
+    finally:
+        # Ensure we always clean up
+        audio_player.stop()
+        console.print("Playback complete!")
 
 def read_stdin_text():
     """Read text from stdin if available."""
@@ -112,6 +56,9 @@ def read_stdin_text():
 
 def main():
     """Entry point for the CLI."""
+    # Register the signal handler for keyboard interrupt
+    signal.signal(signal.SIGINT, signal_handler)
+
     parser = argparse.ArgumentParser(description="Convert text to speech with visualization")
     parser.add_argument("text", nargs="?", default=None,
                         help="Text to convert to speech (default: reads from stdin or uses a sample text)")
@@ -135,7 +82,14 @@ def main():
     if text is None:
         text = "Today is a wonderful day to build something people love!"
 
-    asyncio.run(async_main(text, args.voice, args.instructions, args.model))
+    try:
+        asyncio.run(async_main(text, args.voice, args.instructions, args.model))
+    except KeyboardInterrupt:
+        # This is a fallback in case the signal handler doesn't work
+        console.print("\n[bold]Playback cancelled[/]")
+        if audio_player:
+            audio_player.stop()
+        sys.exit(0)
 
 if __name__ == "__main__":
     main()
