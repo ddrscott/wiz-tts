@@ -5,7 +5,7 @@ tag:
 	git tag -a "v$(VERSION)" -m "version++ (v$(VERSION))" && \
 	git push origin "v$(VERSION)"
 
-release: tag dist
+release: tag
 	# Create a new GitHub release
 	gh release create "v$(VERSION)" \
 		--title "v$(VERSION)" \

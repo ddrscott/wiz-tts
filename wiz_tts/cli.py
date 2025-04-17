@@ -25,7 +25,7 @@ async def async_main(text: str, voice: str = "coral", instructions: str = "", mo
     """Main function to handle TTS generation and playback."""
     global audio_player
 
-    console.print(f"Generating speech with {model}, voice: {voice}...")
+    console.print(f"wiz-tts with model: {model}, voice: {voice}")
 
     # Initialize services
     tts = TextToSpeech()
@@ -62,12 +62,12 @@ def main():
     parser = argparse.ArgumentParser(description="Convert text to speech with visualization")
     parser.add_argument("text", nargs="?", default=None,
                         help="Text to convert to speech (default: reads from stdin or uses a sample text)")
-    parser.add_argument("--voice", "-v", default="coral",
+    parser.add_argument("--voice", "-v", default="nova",
                         choices=["alloy", "echo", "fable", "onyx", "nova", "shimmer", "coral"],
                         help="Voice to use for speech (default: coral)")
     parser.add_argument("--instructions", "-i", default="",
                         help="Instructions for the speech style")
-    parser.add_argument("--model", "-m", default="tts-1",
+    parser.add_argument("--model", "-m", default="gpt-4o-mini-tts",
                         choices=["tts-1", "tts-1-hd", "gpt-4o-mini-tts"],
                         help="TTS model to use (default: tts-1)")
 
