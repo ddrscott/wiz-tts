@@ -33,7 +33,7 @@ async def async_main(text: str, voice: str = "coral", instructions: str = "", mo
     audio_player.start()
 
     try:
-        with console.status("Playing...") as status:
+        with console.status("Generating...") as status:
             async for chunk in tts.generate_speech(text, voice, instructions, model):
                 # Process chunk and get visualization data
                 viz_data = audio_player.play_chunk(chunk)
