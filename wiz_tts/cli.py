@@ -33,11 +33,11 @@ async def async_main(text: str, voice: str = "coral", instructions: str = "", mo
 
     # Prepare data directory if provided
     data_path = Path(data_dir) if data_dir else None
-    
+
     # Initialize services
     tts = TextToSpeech()
     audio_player = AudioPlayer(data_path)
-    
+
     # Set metadata if we're saving
     if data_path:
         metadata = {
@@ -50,26 +50,36 @@ async def async_main(text: str, voice: str = "coral", instructions: str = "", mo
             "bitrate": bitrate
         }
         audio_player.set_metadata(metadata)
-    
+
     audio_player.start()
 
+    file_path_announced = False
     try:
-        with console.status("Generating...") as status:
+        with console.status("Generating...", refresh_per_second=60) as status:
+
             async for chunk in tts.generate_speech(text, voice, instructions, model):
                 # Process chunk and get visualization data
                 viz_data = audio_player.play_chunk(chunk)
 
                 # Update display if visualization data is available
                 if viz_data:
-                    status.update(f"[{viz_data['counter']}] ▶ {viz_data['histogram']}")
+                    # If this is the first chunk and we have a file path, announce it
+                    if 'saving_to' in viz_data and not file_path_announced:
+                        console.print(f"[green]Saving audio to:[/] {viz_data['saving_to']}")
+                        file_path_announced = True
+                        status.update(f"Generating... ▶ {viz_data.get('histogram', '')}")
+                    else:
+                        status.update(f"[{viz_data['counter']}] ▶ {viz_data['histogram']}")
 
     finally:
-        # Save audio if requested
+        # Finalize audio if requested
         if data_path:
             saved_path = audio_player.save_audio()
-            if saved_path:
+            if saved_path and not file_path_announced:
                 console.print(f"[green]Audio saved to:[/] {saved_path}")
-        
+            elif saved_path:
+                console.print(f"[green]Audio finalized.[/]")
+
         # Ensure we always clean up
         audio_player.stop()
         console.print("Playback complete!")
@@ -97,12 +107,12 @@ def main():
     parser.add_argument("--model", "-m", default="gpt-4o-mini-tts",
                         choices=["tts-1", "tts-1-hd", "gpt-4o-mini-tts"],
                         help="TTS model to use (default: tts-1)")
-    
+
     # Get data directory from environment variable if set, otherwise None
     default_data_dir = os.environ.get("WIZ_TTS_DATA_DIR")
     parser.add_argument("--data-dir", "-d", default=default_data_dir,
                         help="Directory to save audio files and metadata (default: $WIZ_TTS_DATA_DIR if set)")
-    parser.add_argument("--bitrate", "-b", default="24k", 
+    parser.add_argument("--bitrate", "-b", default="24k",
                         help="Audio bitrate for saved files (default: 24k)")
 
     args = parser.parse_args()

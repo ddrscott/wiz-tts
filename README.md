@@ -30,6 +30,28 @@ echo "Your text" | uv run -- wiz-tts
 cat file.txt | uv run -- wiz-tts
 ```
 
+
+### Fun Zsh Function
+
+```sh
+genz() {
+    local url="$1"
+    if [[ -z "$url" ]]; then
+        echo "Error: URL is required" >&2
+        return 1
+    fi
+    local content=$(w3m -dump "$url")
+    local persona="gen-z podcaster, cringe but cool and on fire"
+    ollama run llama3.2 "Analyze the contents of this webpage:
+$content
+---
+Act as a ${persona}, and compose a succinct monologue.
+[no intros or closing, just the meat\!]
+" | tee /dev/tty   \
+  | wiz-tts -i "${persona}"
+}
+```
+
 ### Options
 
 ```
@@ -87,7 +109,7 @@ Processing a text file:
 cat story.txt | uv run -- wiz-tts --voice echo
 ```
 
-Saving audio to a directory:
+Saving audio to a directory (files are saved as soon as they start generating):
 ```bash
 uv run -- wiz-tts "Save this speech to a file" --data-dir ./saved_audio
 ```
@@ -119,6 +141,7 @@ uv run -- wiz-tts "Compressed audio" --data-dir ./saved_audio --bitrate 16k
 - Reads text from command line arguments or stdin
 - Supports multiple TTS models
 - Option to save generated audio as WebM files with metadata and configurable compression
+- Saves metadata and audio files immediately as they're being generated (no need to wait for completion)
 
 ## Requirements
 

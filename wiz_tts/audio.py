@@ -23,6 +23,9 @@ class AudioPlayer:
         self.data_dir = data_dir
         self.full_audio_data = bytearray()  # Store all audio data for saving
         self.metadata = {}  # Store metadata for inference options
+        self.timestamp = int(time.time())
+        self.metadata_saved = False
+        self.audio_file = None  # Will hold the file handle for incremental saving
 
     def start(self):
         """Initialize and start the audio stream."""
@@ -49,8 +52,20 @@ class AudioPlayer:
         self.is_playing = False
 
     def set_metadata(self, metadata: Dict[str, Any]):
-        """Set metadata for the audio file."""
+        """Set metadata for the audio file and save it immediately."""
         self.metadata = metadata
+
+        # Save metadata immediately if we have a data directory
+        if self.data_dir and not self.metadata_saved:
+            # Ensure the data directory exists
+            self.data_dir.mkdir(parents=True, exist_ok=True)
+
+            # Save metadata to JSON file
+            metadata_path = self.data_dir / f"audio_{self.timestamp}_metadata.json"
+            with open(metadata_path, 'w') as f:
+                json.dump(self.metadata, f, indent=2)
+
+            self.metadata_saved = True
 
     def play_chunk(self, chunk: bytes) -> dict:
         """
@@ -65,9 +80,24 @@ class AudioPlayer:
         # Write directly to sound device
         self.stream.write(chunk)
 
-        # If we're saving, store the full audio data
+        # If we're saving, store the full audio data and start saving WebM if first chunk
         if self.data_dir:
             self.full_audio_data.extend(chunk)
+
+            # Start WebM file if this is the first audio chunk and we have metadata
+            if len(self.full_audio_data) == len(chunk) and self.metadata:
+                # Ensure the data directory exists
+                self.data_dir.mkdir(parents=True, exist_ok=True)
+
+                # Create WebM file path
+                self.webm_path = self.data_dir / f"audio_{self.timestamp}.webm"
+
+                # Return file path for progress indicator
+                return {
+                    "counter": 0,
+                    "histogram": "",
+                    "saving_to": str(self.webm_path)
+                }
 
         # Store for visualization
         chunk_data = np.frombuffer(chunk, dtype=np.int16)
@@ -94,7 +124,8 @@ class AudioPlayer:
 
     def save_audio(self) -> Optional[Path]:
         """
-        Save the collected audio data to a WebM file with metadata.
+        Finalize the collected audio data to a WebM file with metadata.
+        The metadata file is already saved at the beginning.
 
         Returns:
             Path: The path to the saved file, or None if no data or data_dir
@@ -102,13 +133,12 @@ class AudioPlayer:
         if not self.data_dir or not self.full_audio_data:
             return None
 
-        # Ensure the data directory exists
-        self.data_dir.mkdir(parents=True, exist_ok=True)
+        # Use the same webm_path that was created at the beginning
+        file_path = getattr(self, 'webm_path', None)
 
-        # Create a timestamp-based filename
-        timestamp = int(time.time())
-        filename = f"audio_{timestamp}.webm"
-        file_path = self.data_dir / filename
+        # If we don't have a path yet (unlikely), create one
+        if file_path is None:
+            file_path = self.data_dir / f"audio_{self.timestamp}.webm"
 
         # Convert raw PCM to AudioSegment
         audio = AudioSegment(
@@ -133,11 +163,6 @@ class AudioPlayer:
                 "-metadata", f"metadata={json.dumps(self.metadata)}"
             ]
         )
-
-        # Create a separate metadata JSON file for easier access
-        metadata_path = self.data_dir / f"audio_{timestamp}_metadata.json"
-        with open(metadata_path, 'w') as f:
-            json.dump(self.metadata, f, indent=2)
 
         return file_path
 
