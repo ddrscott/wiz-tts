@@ -2,7 +2,11 @@ import asyncio
 import argparse
 import sys
 import signal
-from typing import Optional
+import os
+import json
+import time
+from pathlib import Path
+from typing import Optional, Union
 
 from rich.console import Console
 from rich.status import Status
@@ -21,15 +25,32 @@ def signal_handler(sig, frame):
         audio_player.stop()
     sys.exit(0)
 
-async def async_main(text: str, voice: str = "coral", instructions: str = "", model: str = "tts-1") -> None:
+async def async_main(text: str, voice: str = "coral", instructions: str = "", model: str = "tts-1", data_dir: Optional[str] = None, bitrate: str = "24k") -> None:
     """Main function to handle TTS generation and playback."""
     global audio_player
 
     console.print(f"wiz-tts with model: {model}, voice: {voice}")
 
+    # Prepare data directory if provided
+    data_path = Path(data_dir) if data_dir else None
+    
     # Initialize services
     tts = TextToSpeech()
-    audio_player = AudioPlayer()
+    audio_player = AudioPlayer(data_path)
+    
+    # Set metadata if we're saving
+    if data_path:
+        metadata = {
+            "text": text,
+            "voice": voice,
+            "model": model,
+            "instructions": instructions,
+            "timestamp": time.time(),
+            "date": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "bitrate": bitrate
+        }
+        audio_player.set_metadata(metadata)
+    
     audio_player.start()
 
     try:
@@ -43,6 +64,12 @@ async def async_main(text: str, voice: str = "coral", instructions: str = "", mo
                     status.update(f"[{viz_data['counter']}] ▶ {viz_data['histogram']}")
 
     finally:
+        # Save audio if requested
+        if data_path:
+            saved_path = audio_player.save_audio()
+            if saved_path:
+                console.print(f"[green]Audio saved to:[/] {saved_path}")
+        
         # Ensure we always clean up
         audio_player.stop()
         console.print("Playback complete!")
@@ -70,6 +97,13 @@ def main():
     parser.add_argument("--model", "-m", default="gpt-4o-mini-tts",
                         choices=["tts-1", "tts-1-hd", "gpt-4o-mini-tts"],
                         help="TTS model to use (default: tts-1)")
+    
+    # Get data directory from environment variable if set, otherwise None
+    default_data_dir = os.environ.get("WIZ_TTS_DATA_DIR")
+    parser.add_argument("--data-dir", "-d", default=default_data_dir,
+                        help="Directory to save audio files and metadata (default: $WIZ_TTS_DATA_DIR if set)")
+    parser.add_argument("--bitrate", "-b", default="24k", 
+                        help="Audio bitrate for saved files (default: 24k)")
 
     args = parser.parse_args()
 
@@ -83,7 +117,7 @@ def main():
         text = "Today is a wonderful day to build something people love!"
 
     try:
-        asyncio.run(async_main(text, args.voice, args.instructions, args.model))
+        asyncio.run(async_main(text, args.voice, args.instructions, args.model, args.data_dir, args.bitrate))
     except KeyboardInterrupt:
         # This is a fallback in case the signal handler doesn't work
         console.print("\n[bold]Playback cancelled[/]")

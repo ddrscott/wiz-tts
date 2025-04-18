@@ -1,7 +1,12 @@
 import numpy as np
 import sounddevice as sd
 from scipy.fftpack import fft
-from typing import List, Iterator, AsyncIterator
+from pydub import AudioSegment
+import os
+import json
+import time
+from pathlib import Path
+from typing import List, Iterator, AsyncIterator, Optional, Dict, Any, Union
 
 # Constants for audio processing
 SAMPLE_RATE = 24000  # OpenAI's PCM format is 24kHz
@@ -10,11 +15,14 @@ CHUNK_SIZE = 4800  # 200ms chunks for visualization (5 updates per second)
 class AudioPlayer:
     """Handles audio playback and visualization processing."""
 
-    def __init__(self):
+    def __init__(self, data_dir: Optional[Path] = None):
         self.stream = None
         self.audio_buffer = []
         self.chunk_counter = 0
         self.is_playing = False
+        self.data_dir = data_dir
+        self.full_audio_data = bytearray()  # Store all audio data for saving
+        self.metadata = {}  # Store metadata for inference options
 
     def start(self):
         """Initialize and start the audio stream."""
@@ -25,9 +33,10 @@ class AudioPlayer:
         )
         self.stream.start()
         # Play a brief silence to prevent initial crackling
-        silence = bytes(1024)  # 1024 bytes of silence (all zeros)
+        silence = bytes(1024 * 10)  # 1024 bytes of silence (all zeros)
         self.stream.write(silence)
         self.audio_buffer = []
+        self.full_audio_data = bytearray()  # Reset the full audio data
         self.chunk_counter = 0
         self.is_playing = True
 
@@ -38,6 +47,10 @@ class AudioPlayer:
             self.stream.close()
             self.stream = None
         self.is_playing = False
+
+    def set_metadata(self, metadata: Dict[str, Any]):
+        """Set metadata for the audio file."""
+        self.metadata = metadata
 
     def play_chunk(self, chunk: bytes) -> dict:
         """
@@ -51,6 +64,10 @@ class AudioPlayer:
 
         # Write directly to sound device
         self.stream.write(chunk)
+
+        # If we're saving, store the full audio data
+        if self.data_dir:
+            self.full_audio_data.extend(chunk)
 
         # Store for visualization
         chunk_data = np.frombuffer(chunk, dtype=np.int16)
@@ -74,6 +91,55 @@ class AudioPlayer:
             }
 
         return None
+
+    def save_audio(self) -> Optional[Path]:
+        """
+        Save the collected audio data to a WebM file with metadata.
+
+        Returns:
+            Path: The path to the saved file, or None if no data or data_dir
+        """
+        if not self.data_dir or not self.full_audio_data:
+            return None
+
+        # Ensure the data directory exists
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create a timestamp-based filename
+        timestamp = int(time.time())
+        filename = f"audio_{timestamp}.webm"
+        file_path = self.data_dir / filename
+
+        # Convert raw PCM to AudioSegment
+        audio = AudioSegment(
+            data=bytes(self.full_audio_data),
+            sample_width=2,  # 16-bit audio (2 bytes)
+            frame_rate=SAMPLE_RATE,
+            channels=1
+        )
+
+        # Save as WebM format with Opus codec optimized for speech
+        audio.export(
+            str(file_path),
+            format="webm",
+            parameters=[
+                # Use Opus codec (excellent for speech)
+                "-c:a", "libopus",
+                # Optimize for speech
+                "-application", "voip",
+                # Bitrate in kbps (using value from metadata or default)
+                "-b:a", self.metadata.get("bitrate", "24k"),
+                # Add metadata
+                "-metadata", f"metadata={json.dumps(self.metadata)}"
+            ]
+        )
+
+        # Create a separate metadata JSON file for easier access
+        metadata_path = self.data_dir / f"audio_{timestamp}_metadata.json"
+        with open(metadata_path, 'w') as f:
+            json.dump(self.metadata, f, indent=2)
+
+        return file_path
 
 def generate_histogram(fft_values: np.ndarray, width: int = 12) -> str:
     """Generate a text-based histogram from FFT values."""
