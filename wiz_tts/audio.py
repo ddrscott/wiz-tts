@@ -24,6 +24,9 @@ class AudioPlayer:
             dtype='int16',
         )
         self.stream.start()
+        # Play a brief silence to prevent initial crackling
+        silence = bytes(1024)  # 1024 bytes of silence (all zeros)
+        self.stream.write(silence)
         self.audio_buffer = []
         self.chunk_counter = 0
         self.is_playing = True
