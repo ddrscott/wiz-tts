@@ -35,20 +35,17 @@ cat file.txt | uv run -- wiz-tts
 
 ```sh
 genz() {
-    local url="$1"
-    if [[ -z "$url" ]]; then
-        echo "Error: URL is required" >&2
-        return 1
-    fi
-    local content=$(w3m -dump "$url")
+    [[ -z "$1" ]] && echo "Error: URL is required" >&2 && return 1
+
+    local content=$(w3m -dump "$1")
     local persona="gen-z podcaster, cringe but cool and on fire"
-    ollama run llama3.2 "Analyze the contents of this webpage:
+    ollama run llama3.2 <<PROMPT | tee /dev/tty | wiz-tts -i "$persona"
+Analyze the contents of this webpage:
 $content
 ---
 Act as a ${persona}, and compose a succinct monologue.
 [no intros or closing, just the meat\!]
-" | tee /dev/tty   \
-  | wiz-tts -i "${persona}"
+PROMPT
 }
 ```
 
