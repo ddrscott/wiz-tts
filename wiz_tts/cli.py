@@ -99,14 +99,14 @@ def main():
     parser = argparse.ArgumentParser(description="Convert text to speech with visualization")
     parser.add_argument("text", nargs="?", default=None,
                         help="Text to convert to speech (default: reads from stdin or uses a sample text)")
-    parser.add_argument("--voice", "-v", default="nova",
+    parser.add_argument("--voice", "-v", default="coral",
                         choices=["alloy", "echo", "fable", "onyx", "nova", "shimmer", "coral"],
                         help="Voice to use for speech (default: coral)")
     parser.add_argument("--instructions", "-i", default="",
                         help="Instructions for the speech style")
     parser.add_argument("--model", "-m", default="gpt-4o-mini-tts",
                         choices=["tts-1", "tts-1-hd", "gpt-4o-mini-tts"],
-                        help="TTS model to use (default: tts-1)")
+                        help="TTS model to use (default: gpt-4o-mini-tts)")
 
     # Get data directory from environment variable if set, otherwise None
     default_data_dir = os.environ.get("WIZ_TTS_DATA_DIR")
@@ -114,6 +114,11 @@ def main():
                         help="Directory to save audio files and metadata (default: $WIZ_TTS_DATA_DIR if set)")
     parser.add_argument("--bitrate", "-b", default="24k",
                         help="Audio bitrate for saved files (default: 24k)")
+
+    # If no arguments provided at all, show help
+    if len(sys.argv) == 1:
+        parser.print_help()
+        sys.exit(0)
 
     args = parser.parse_args()
 
