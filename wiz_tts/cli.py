@@ -100,7 +100,7 @@ def main():
     parser.add_argument("text", nargs="?", default=None,
                         help="Text to convert to speech (default: reads from stdin or uses a sample text)")
     parser.add_argument("--voice", "-v", default="coral",
-                        choices=["alloy", "echo", "fable", "onyx", "nova", "shimmer", "coral"],
+                        choices=["alloy", "echo", "fable", "onyx", "nova", "shimmer", "coral", "ash", "ballad", "coral", "sage", "verse"],
                         help="Voice to use for speech (default: coral)")
     parser.add_argument("--instructions", "-i", default="",
                         help="Instructions for the speech style")
