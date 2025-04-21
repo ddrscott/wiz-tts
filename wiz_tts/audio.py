@@ -5,6 +5,7 @@ from pydub import AudioSegment
 import os
 import json
 import time
+import asyncio
 from pathlib import Path
 from typing import List, Iterator, AsyncIterator, Optional, Dict, Any, Union
 
@@ -15,11 +16,16 @@ CHUNK_SIZE = 4800  # 200ms chunks for visualization (5 updates per second)
 class AudioPlayer:
     """Handles audio playback and visualization processing."""
 
-    def __init__(self, data_dir: Optional[Path] = None):
+    def __init__(self, data_dir: Optional[Path] = None, prebuffer_size: int = 5):
         self.stream = None
         self.audio_buffer = []
+        self.playback_buffer = bytearray()
+        self.prebuffer_size = prebuffer_size  # Number of chunks to buffer before playback
+        self.buffered_chunks = 0
         self.chunk_counter = 0
         self.is_playing = False
+        self.playback_complete = False
+        self.has_received_all_chunks = False
         self.data_dir = data_dir
         self.full_audio_data = bytearray()  # Store all audio data for saving
         self.metadata = {}  # Store metadata for inference options
@@ -36,12 +42,16 @@ class AudioPlayer:
             samplerate=sample_rate,
             channels=1,
             dtype='int16',
+            blocksize=4096,  # Explicit block size for more stable playback
+            latency='high',  # Higher latency for more stable playback
         )
         self.stream.start()
         # Play a brief silence to prevent initial crackling
         silence = bytes(1024 * 10)  # 1024 bytes of silence (all zeros)
         self.stream.write(silence)
         self.audio_buffer = []
+        self.playback_buffer = bytearray()
+        self.buffered_chunks = 0
         self.full_audio_data = bytearray()  # Reset the full audio data
         self.chunk_counter = 0
         self.is_playing = True
@@ -53,6 +63,39 @@ class AudioPlayer:
             self.stream.close()
             self.stream = None
         self.is_playing = False
+        self.playback_complete = True
+        
+    def mark_all_chunks_received(self):
+        """Mark that all audio chunks have been received from the TTS API."""
+        self.has_received_all_chunks = True
+        
+    async def drain_playback_buffer(self):
+        """Play the remaining audio in the buffer until it's empty."""
+        if not self.is_playing or not self.stream:
+            self.playback_complete = True
+            return
+            
+        # Continue playing until the buffer is empty
+        while len(self.playback_buffer) > 0 and self.is_playing:
+            play_size = min(len(self.playback_buffer), 8192)
+            if play_size > 0:
+                self.stream.write(bytes(self.playback_buffer[:play_size]))
+                self.playback_buffer = self.playback_buffer[play_size:]
+            await asyncio.sleep(0.05)  # Short sleep to prevent CPU hogging
+            
+        self.playback_complete = True
+        
+    async def wait_for_playback_complete(self, timeout=60.0):
+        """Wait until playback is complete or timeout is reached."""
+        start_time = time.time()
+        while not self.playback_complete and (time.time() - start_time) < timeout:
+            # If we've received all chunks and the buffer is empty, playback is complete
+            if self.has_received_all_chunks and len(self.playback_buffer) == 0:
+                self.playback_complete = True
+                break
+            await asyncio.sleep(0.1)  # Wait a bit before checking again
+            
+        return self.playback_complete
 
     def set_metadata(self, metadata: Dict[str, Any]):
         """Set metadata for the audio file and save it immediately."""
@@ -76,15 +119,13 @@ class AudioPlayer:
     def play_chunk(self, chunk: bytes) -> dict:
         """
         Play an audio chunk and process for visualization.
+        Uses a pre-buffer strategy to collect chunks before playback starts.
 
         Returns:
             dict: Visualization data including histogram and counter
         """
         if not self.is_playing or not self.stream:
             return None
-
-        # Write directly to sound device
-        self.stream.write(chunk)
 
         # If we're saving, store the full audio data and start saving WebM if first chunk
         if self.data_dir:
@@ -104,6 +145,20 @@ class AudioPlayer:
                     "histogram": "",
                     "saving_to": str(self.webm_path)
                 }
+
+        # Add to playback buffer
+        self.playback_buffer.extend(chunk)
+        self.buffered_chunks += 1
+
+        # Only start playing after we've buffered enough chunks
+        if self.buffered_chunks >= self.prebuffer_size:
+            # Use a reasonable chunk size for playing to avoid stuttering
+            play_size = min(len(self.playback_buffer), 8192)
+            if play_size > 0:
+                # Play a chunk from the buffer
+                self.stream.write(bytes(self.playback_buffer[:play_size]))
+                # Remove the played portion from the buffer
+                self.playback_buffer = self.playback_buffer[play_size:]
 
         # Store for visualization
         chunk_data = np.frombuffer(chunk, dtype=np.int16)

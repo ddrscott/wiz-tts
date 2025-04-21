@@ -19,11 +19,19 @@ console = Console()
 audio_player = None
 
 def signal_handler(sig, frame):
-    """Handle Ctrl+C by stopping audio playback."""
+    """Handle Ctrl+C by stopping audio playback and saving audio."""
     global audio_player
     if audio_player:
         console.print("\n[bold red]Playback interrupted![/]")
+        # Don't call sys.exit() immediately - allow for cleanup
         audio_player.stop()
+        
+        # If we have a data directory, make sure to finalize the audio
+        if audio_player.data_dir:
+            saved_path = audio_player.save_audio()
+            if saved_path:
+                console.print(f"[green]Audio saved to:[/] {saved_path}")
+    
     sys.exit(0)
 
 async def async_main(text: str, voice: str = "coral", instructions: str = "", model: str = "tts-1", data_dir: Optional[str] = None, bitrate: str = "24k") -> None:
@@ -76,6 +84,13 @@ async def async_main(text: str, voice: str = "coral", instructions: str = "", mo
                         status.update(f"Generating... ▶ {viz_data.get('histogram', '')}")
                     else:
                         status.update(f"[{viz_data['counter']}] ▶ {viz_data['histogram']}")
+            
+            # Mark that we've received all chunks from the TTS API
+            audio_player.mark_all_chunks_received()
+            
+            # Drain the buffer to ensure all audio is played
+            status.update(f"Completing playback...")
+            await audio_player.drain_playback_buffer()
 
     finally:
         # Finalize audio if requested
