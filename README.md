@@ -36,7 +36,6 @@ cat file.txt | uv run -- wiz-tts
 ```sh
 genz() {
     [[ -z "$1" ]] && echo "Error: URL is required" >&2 && return 1
-
     local content=$(w3m -dump "$1")
     local persona="gen-z podcaster, cringe but cool and on fire"
     ollama run llama3.2 <<PROMPT | tee /dev/tty | wiz-tts -i "$persona"
@@ -47,6 +46,26 @@ Act as a ${persona}, and compose a succinct monologue.
 [no intros or closing, just the meat\!]
 PROMPT
 }
+```
+
+### Example as Mac Shortcut.app Script
+```sh
+exec /opt/homebrew/bin/zsh -i -c "$(cat <<SHELL
+INSTRUCTIONS="
+  Voice: Warm, conversational, and authentic, with natural vocal variety and a relaxed pace that invites listeners to settle in for extended listening. Occasional subtle emphasis on key points without sounding rehearsed.
+
+  Punctuation: Thoughtful pauses that allow ideas to breathe, varied sentence lengths to maintain interest, and natural breaks that mimic genuine conversation rather than reading.
+
+  Delivery: Balanced and rhythmic with a dynamic range that prevents monotony, incorporating strategic shifts in pace and volume to highlight important information or create narrative tension.
+
+  Phrasing: Accessible and relatable, using conversational language with occasional colorful expressions or personal anecdotes to build connection. Ideas flow naturally from one to the next with smooth transitions.
+
+  Tone: Engaging and inclusive, striking a balance between informative and entertaining, with moments of gentle humor, curiosity, and genuine enthusiasm speaking with a knowledgeable friend.
+"
+
+pbpaste | wiz-tts --voice verse --data-dir "${HOME}/Downloads/wiz-tts-data" --instructions "\$INSTRUCTIONS"
+SHELL
+)"
 ```
 
 ### Options

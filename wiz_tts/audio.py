@@ -8,8 +8,8 @@ import time
 from pathlib import Path
 from typing import List, Iterator, AsyncIterator, Optional, Dict, Any, Union
 
-# Constants for audio processing
-SAMPLE_RATE = 24000  # OpenAI's PCM format is 24kHz
+# Default sample rate (used as fallback)
+DEFAULT_SAMPLE_RATE = 24000  # OpenAI's PCM format is 24kHz
 CHUNK_SIZE = 4800  # 200ms chunks for visualization (5 updates per second)
 
 class AudioPlayer:
@@ -26,17 +26,20 @@ class AudioPlayer:
         self.timestamp = int(time.time())
         self.metadata_saved = False
         self.audio_file = None  # Will hold the file handle for incremental saving
+        self.sample_rate = DEFAULT_SAMPLE_RATE  # Default sample rate
 
-    def start(self):
-        """Initialize and start the audio stream."""
+    def start(self, sample_rate: int = DEFAULT_SAMPLE_RATE):
+        """Initialize and start the audio stream with the specified sample rate."""
+        self.sample_rate = sample_rate
+
         self.stream = sd.RawOutputStream(
-            samplerate=SAMPLE_RATE,
+            samplerate=sample_rate,
             channels=1,
             dtype='int16',
         )
         self.stream.start()
         # Play a brief silence to prevent initial crackling
-        silence = bytes(1024 * 10)  # 1024 bytes of silence (all zeros)
+        silence = bytes(1024 * 100)  # 1024 bytes of silence (all zeros)
         self.stream.write(silence)
         self.audio_buffer = []
         self.full_audio_data = bytearray()  # Reset the full audio data
@@ -54,6 +57,9 @@ class AudioPlayer:
     def set_metadata(self, metadata: Dict[str, Any]):
         """Set metadata for the audio file and save it immediately."""
         self.metadata = metadata
+
+        # Add the correct sample rate to metadata
+        self.metadata["sample_rate"] = self.sample_rate
 
         # Save metadata immediately if we have a data directory
         if self.data_dir and not self.metadata_saved:
@@ -103,17 +109,20 @@ class AudioPlayer:
         chunk_data = np.frombuffer(chunk, dtype=np.int16)
         self.audio_buffer.extend(chunk_data)
 
+        # Calculate visualization size based on sample rate
+        vis_chunk_size = int(self.sample_rate * 0.2)  # 200ms worth of samples
+
         # Process visualization data when we have enough
-        if len(self.audio_buffer) >= CHUNK_SIZE:
+        if len(self.audio_buffer) >= vis_chunk_size:
             # Calculate FFT on current chunk
-            fft_result = fft(self.audio_buffer[:CHUNK_SIZE])
+            fft_result = fft(self.audio_buffer[:vis_chunk_size])
             histogram = generate_histogram(fft_result)
 
             # Update counter
             self.chunk_counter += 1
 
             # Keep only the newest data
-            self.audio_buffer = self.audio_buffer[CHUNK_SIZE:]
+            self.audio_buffer = self.audio_buffer[vis_chunk_size:]
 
             return {
                 "counter": self.chunk_counter,
@@ -144,7 +153,7 @@ class AudioPlayer:
         audio = AudioSegment(
             data=bytes(self.full_audio_data),
             sample_width=2,  # 16-bit audio (2 bytes)
-            frame_rate=SAMPLE_RATE,
+            frame_rate=self.sample_rate,  # Use the actual sample rate
             channels=1
         )
 

@@ -36,6 +36,8 @@ async def async_main(text: str, voice: str = "coral", instructions: str = "", mo
 
     # Initialize services
     tts = TextToSpeech()
+
+    # Initialize audio player (will configure sample rate during playback)
     audio_player = AudioPlayer(data_path)
 
     # Set metadata if we're saving
@@ -51,13 +53,16 @@ async def async_main(text: str, voice: str = "coral", instructions: str = "", mo
         }
         audio_player.set_metadata(metadata)
 
-    audio_player.start()
-
     file_path_announced = False
     try:
         with console.status("Generating...", refresh_per_second=60) as status:
+            # Get speech data with sample rate
+            sample_rate, speech_generator = tts.generate_speech(text, voice, instructions, model)
 
-            async for chunk in tts.generate_speech(text, voice, instructions, model):
+            # Configure audio player with the correct sample rate
+            audio_player.start(sample_rate)
+
+            async for chunk in speech_generator:
                 # Process chunk and get visualization data
                 viz_data = audio_player.play_chunk(chunk)
 
@@ -99,9 +104,8 @@ def main():
     parser = argparse.ArgumentParser(description="Convert text to speech with visualization")
     parser.add_argument("text", nargs="?", default=None,
                         help="Text to convert to speech (default: reads from stdin or uses a sample text)")
-    parser.add_argument("--voice", "-v", default="coral",
-                        choices=["alloy", "echo", "fable", "onyx", "nova", "shimmer", "coral", "ash", "ballad", "coral", "sage", "verse"],
-                        help="Voice to use for speech (default: coral)")
+    parser.add_argument("--voice", "-v", default="ash",
+                        help="Voice to use for speech (default: ash)")
     parser.add_argument("--instructions", "-i", default="",
                         help="Instructions for the speech style")
     parser.add_argument("--model", "-m", default="gpt-4o-mini-tts",
