@@ -2,6 +2,8 @@ from typing import AsyncIterator, Tuple, Dict, Optional, Any
 import importlib
 import json
 from pathlib import Path
+import importlib.resources
+import os
 
 class TextToSpeech:
     """Handles text-to-speech generation by selecting the appropriate TTS adapter."""
@@ -22,12 +24,28 @@ class TextToSpeech:
         voice_mapping = {}
         model_overrides = {}
 
-        try:
-            # Look for voices.json in the project root directory
-            voices_path = Path(__file__).parent.parent / "voices.json"
-            with open(voices_path, "r") as f:
-                config_data = json.load(f)
+        # Try multiple possible locations for voices.json
+        possible_paths = [
+            # Development location (project root)
+            Path(__file__).parent.parent / "voices.json",
+            # Installed package location (inside package)
+            Path(__file__).parent / "voices.json",
+            # Alternative installed package location
+            Path(__file__).parent / "data" / "voices.json"
+        ]
 
+        config_data = None
+        for voices_path in possible_paths:
+            try:
+                if voices_path.exists():
+                    with open(voices_path, "r") as f:
+                        config_data = json.load(f)
+                        break  # Stop once we've found and loaded the file
+            except Exception as e:
+                print(f"Error loading {voices_path}: {e}")
+                continue  # Try the next path
+
+        if config_data:
             # Process the configuration
             for config in config_data:
                 adapter_name = config["adapter"]
@@ -40,10 +58,8 @@ class TextToSpeech:
                 voices = config["voices"]
                 for voice in voices:
                     voice_mapping[voice] = adapter_name
-
-        except Exception as e:
-            # If there's an error loading the file, log it and use empty mappings
-            print(f"Error loading voices.json: {e}")
+        else:
+            raise FileNotFoundError("No valid voices.json file found in expected locations.")
 
         return voice_mapping, model_overrides
 

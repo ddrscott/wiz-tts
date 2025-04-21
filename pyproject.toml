@@ -18,6 +18,11 @@ dependencies = [
 [project.scripts]
 wiz-tts = "wiz_tts.cli:main"
 
+[tool.setuptools]
+include-package-data = true
+
+# Data files are defined in MANIFEST.in
+
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
