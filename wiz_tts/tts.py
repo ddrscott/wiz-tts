@@ -1,39 +1,51 @@
-from typing import AsyncIterator, Tuple
-from wiz_tts.tts_adapters.openai_tts import OpenAITTS
-from wiz_tts.tts_adapters.groq_tts import GroqTTS
-
-GROQ_VOICES = [
-    "Arista-PlayAI",
-    "Atlas-PlayAI",
-    "Basil-PlayAI",
-    "Briggs-PlayAI",
-    "Calum-PlayAI",
-    "Celeste-PlayAI",
-    "Cheyenne-PlayAI",
-    "Chip-PlayAI",
-    "Cillian-PlayAI",
-    "Deedee-PlayAI",
-    "Fritz-PlayAI",
-    "Gail-PlayAI",
-    "Indigo-PlayAI",
-    "Mamaw-PlayAI",
-    "Mason-PlayAI",
-    "Mikail-PlayAI",
-    "Mitch-PlayAI",
-    "Quinn-PlayAI",
-    "Thunder-PlayAI",
-]
-
-OPENAI_VOICES = [
-    "alloy", "ash", "ballad", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer", "verse"
-]
+from typing import AsyncIterator, Tuple, Dict, Optional, Any
+import importlib
+import json
+from pathlib import Path
 
 class TextToSpeech:
     """Handles text-to-speech generation by selecting the appropriate TTS adapter."""
 
     def __init__(self):
-        self.openai_tts = OpenAITTS()
-        self.groq_tts = GroqTTS()
+        # Load voice configuration from JSON file
+        self.voice_adapters, self.model_overrides = self._load_voice_configuration()
+
+    def _load_voice_configuration(self) -> Tuple[Dict[str, str], Dict[str, str]]:
+        """
+        Load voice configuration from the voices.json file.
+
+        Returns:
+            Tuple of:
+              - Dict mapping voice names to adapter module names
+              - Dict mapping adapter names to model overrides
+        """
+        voice_mapping = {}
+        model_overrides = {}
+
+        try:
+            # Look for voices.json in the project root directory
+            voices_path = Path(__file__).parent.parent / "voices.json"
+            with open(voices_path, "r") as f:
+                config_data = json.load(f)
+
+            # Process the configuration
+            for config in config_data:
+                adapter_name = config["adapter"]
+
+                # Store model override if specified
+                if "override-model" in config:
+                    model_overrides[adapter_name] = config["override-model"]
+
+                # Map all voices to this adapter
+                voices = config["voices"]
+                for voice in voices:
+                    voice_mapping[voice] = adapter_name
+
+        except Exception as e:
+            # If there's an error loading the file, log it and use empty mappings
+            print(f"Error loading voices.json: {e}")
+
+        return voice_mapping, model_overrides
 
     def generate_speech(
         self,
@@ -49,13 +61,26 @@ class TextToSpeech:
             text: The text to convert to speech
             voice: The voice to use
             instructions: Voice style instructions (only supported by OpenAI)
-            model: The TTS model to use
+            model: The TTS model to use (may be overridden by configuration)
 
         Returns:
             Tuple of (sample_rate, AsyncIterator[bytes]) containing the audio sample rate
             and an async iterator of audio chunks
+
+        Raises:
+            ValueError: If the voice is not recognized
         """
-        if voice in GROQ_VOICES:
-            return self.groq_tts.sample_rate, self.groq_tts.generate_speech(text, voice, "playai-tts")
-        else:
-            return self.openai_tts.sample_rate, self.openai_tts.generate_speech(text, voice, instructions, model)
+        # Determine which adapter to use
+        adapter_name = self.voice_adapters.get(voice)
+        if not adapter_name:
+            available_voices = ", ".join(sorted(self.voice_adapters.keys()))
+            raise ValueError(f"Unknown voice: {voice}. Available voices: {available_voices}")
+
+        # Dynamically import the appropriate adapter
+        adapter = importlib.import_module(f"wiz_tts.tts_adapters.{adapter_name}")
+
+        # Check if there's a model override for this adapter
+        actual_model = self.model_overrides.get(adapter_name, model)
+
+        # Forward to the appropriate adapter
+        return adapter.SAMPLE_RATE, adapter.generate_speech(text, voice, instructions, actual_model)

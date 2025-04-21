@@ -3,10 +3,9 @@ import argparse
 import sys
 import signal
 import os
-import json
 import time
 from pathlib import Path
-from typing import Optional, Union
+from typing import Optional
 
 from rich.console import Console
 from rich.status import Status

@@ -39,7 +39,7 @@ class AudioPlayer:
         )
         self.stream.start()
         # Play a brief silence to prevent initial crackling
-        silence = bytes(1024 * 100)  # 1024 bytes of silence (all zeros)
+        silence = bytes(1024 * 10)  # 1024 bytes of silence (all zeros)
         self.stream.write(silence)
         self.audio_buffer = []
         self.full_audio_data = bytearray()  # Reset the full audio data
