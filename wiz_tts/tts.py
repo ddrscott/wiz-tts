@@ -1,5 +1,6 @@
 from typing import AsyncIterator, Tuple
 import importlib
+import asyncio
 from wiz_tts.voices import VOICE_ADAPTERS, MODEL_OVERRIDES
 
 class TextToSpeech:
@@ -9,6 +10,16 @@ class TextToSpeech:
         # Voice configurations are loaded directly from the voices module
         self.voice_adapters = VOICE_ADAPTERS
         self.model_overrides = MODEL_OVERRIDES
+        
+    def get_event_loop(self):
+        """Get or create an event loop for async operations."""
+        try:
+            return asyncio.get_event_loop()
+        except RuntimeError:
+            # If there's no event loop in this thread, create a new one
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            return loop
 
     def generate_speech(
         self,

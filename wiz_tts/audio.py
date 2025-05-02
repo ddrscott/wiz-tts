@@ -38,17 +38,32 @@ class AudioPlayer:
         """Initialize and start the audio stream with the specified sample rate."""
         self.sample_rate = sample_rate
 
+        # Use a higher latency setting for more stable playback
+        # This helps reduce crackling, especially at the start and end
         self.stream = sd.RawOutputStream(
             samplerate=sample_rate,
             channels=1,
             dtype='int16',
-            blocksize=4096,  # Explicit block size for more stable playback
-            latency='high',  # Higher latency for more stable playback
+            blocksize=2048,  # Smaller block size for more consistent playback
+            latency='high',   # Higher latency reduces crackling
+            callback=None,    # No callback for direct write mode
+            device=None,      # Use default output device
         )
         self.stream.start()
-        # Play a brief silence to prevent initial crackling
-        silence = bytes(1024 * 10)  # 1024 bytes of silence (all zeros)
-        self.stream.write(silence)
+
+        # Play substantial silence to prevent initial crackling
+        # This is critical for properly initializing the audio hardware
+        silence_duration_ms = 300  # 300ms of silence
+        silence_bytes = int(sample_rate * silence_duration_ms / 1000) * 2  # 16-bit samples = 2 bytes per sample
+        silence = bytes(silence_bytes)
+
+        # Write the silence in smaller chunks for smoother startup
+        chunk_size = 1024
+        for i in range(0, len(silence), chunk_size):
+            self.stream.write(silence[i:i+chunk_size])
+            time.sleep(0.001)  # Very small delay between chunks
+
+        # Reset state
         self.audio_buffer = []
         self.playback_buffer = bytearray()
         self.buffered_chunks = 0
@@ -64,27 +79,21 @@ class AudioPlayer:
             self.stream = None
         self.is_playing = False
         self.playback_complete = True
-        
+
     def mark_all_chunks_received(self):
         """Mark that all audio chunks have been received from the TTS API."""
         self.has_received_all_chunks = True
-        
+
     async def drain_playback_buffer(self):
-        """Play the remaining audio in the buffer until it's empty."""
-        if not self.is_playing or not self.stream:
-            self.playback_complete = True
-            return
-            
-        # Continue playing until the buffer is empty
-        while len(self.playback_buffer) > 0 and self.is_playing:
-            play_size = min(len(self.playback_buffer), 8192)
-            if play_size > 0:
-                self.stream.write(bytes(self.playback_buffer[:play_size]))
-                self.playback_buffer = self.playback_buffer[play_size:]
-            await asyncio.sleep(0.05)  # Short sleep to prevent CPU hogging
-            
+        """
+        Mark playback as complete since we're using a different buffering strategy now.
+        This is kept for compatibility with the existing code structure.
+        """
+        # With our new queue-based approach, the playback worker handles draining
+        # We just need to mark completion
         self.playback_complete = True
-        
+        await asyncio.sleep(0.05)  # Small sleep just to ensure async context switch
+
     async def wait_for_playback_complete(self, timeout=60.0):
         """Wait until playback is complete or timeout is reached."""
         start_time = time.time()
@@ -94,7 +103,7 @@ class AudioPlayer:
                 self.playback_complete = True
                 break
             await asyncio.sleep(0.1)  # Wait a bit before checking again
-            
+
         return self.playback_complete
 
     def set_metadata(self, metadata: Dict[str, Any]):
@@ -118,8 +127,11 @@ class AudioPlayer:
 
     def play_chunk(self, chunk: bytes) -> dict:
         """
-        Play an audio chunk and process for visualization.
-        Uses a pre-buffer strategy to collect chunks before playback starts.
+        Process an audio chunk for playback and visualization.
+        Since we're using a queue-based approach in the CLI, this now handles:
+        1. Direct playback of the chunk
+        2. Storing for saving to file
+        3. Visualization processing
 
         Returns:
             dict: Visualization data including histogram and counter
@@ -127,7 +139,7 @@ class AudioPlayer:
         if not self.is_playing or not self.stream:
             return None
 
-        # If we're saving, store the full audio data and start saving WebM if first chunk
+        # If we're saving, store the full audio data
         if self.data_dir:
             self.full_audio_data.extend(chunk)
 
@@ -146,21 +158,11 @@ class AudioPlayer:
                     "saving_to": str(self.webm_path)
                 }
 
-        # Add to playback buffer
-        self.playback_buffer.extend(chunk)
-        self.buffered_chunks += 1
+        # Play the chunk directly - playback is now managed by the CLI's buffering
+        if self.stream and chunk:
+            self.stream.write(chunk)
 
-        # Only start playing after we've buffered enough chunks
-        if self.buffered_chunks >= self.prebuffer_size:
-            # Use a reasonable chunk size for playing to avoid stuttering
-            play_size = min(len(self.playback_buffer), 8192)
-            if play_size > 0:
-                # Play a chunk from the buffer
-                self.stream.write(bytes(self.playback_buffer[:play_size]))
-                # Remove the played portion from the buffer
-                self.playback_buffer = self.playback_buffer[play_size:]
-
-        # Store for visualization
+        # Process visualization
         chunk_data = np.frombuffer(chunk, dtype=np.int16)
         self.audio_buffer.extend(chunk_data)
 
@@ -204,31 +206,43 @@ class AudioPlayer:
         if file_path is None:
             file_path = self.data_dir / f"audio_{self.timestamp}.webm"
 
-        # Convert raw PCM to AudioSegment
-        audio = AudioSegment(
-            data=bytes(self.full_audio_data),
-            sample_width=2,  # 16-bit audio (2 bytes)
-            frame_rate=self.sample_rate,  # Use the actual sample rate
-            channels=1
-        )
+        try:
+            # Stop the stream before saving to avoid any interference
+            # We'll restart if needed
+            streaming_active = False
+            if self.stream and self.is_playing:
+                streaming_active = True
+                self.stream.stop()
 
-        # Save as WebM format with Opus codec optimized for speech
-        audio.export(
-            str(file_path),
-            format="webm",
-            parameters=[
-                # Use Opus codec (excellent for speech)
-                "-c:a", "libopus",
-                # Optimize for speech
-                "-application", "voip",
-                # Bitrate in kbps (using value from metadata or default)
-                "-b:a", self.metadata.get("bitrate", "24k"),
-                # Add metadata
-                "-metadata", f"metadata={json.dumps(self.metadata)}"
-            ]
-        )
+            # Convert raw PCM to AudioSegment
+            audio = AudioSegment(
+                data=bytes(self.full_audio_data),
+                sample_width=2,  # 16-bit audio (2 bytes)
+                frame_rate=self.sample_rate,  # Use the actual sample rate
+                channels=1
+            )
 
-        return file_path
+            # Save as WebM format with Opus codec optimized for speech
+            audio.export(
+                str(file_path),
+                format="webm",
+                parameters=[
+                    # Use Opus codec (excellent for speech)
+                    "-c:a", "libopus",
+                    # Optimize for speech
+                    "-application", "voip",
+                    # Bitrate in kbps (using value from metadata or default)
+                    "-b:a", self.metadata.get("bitrate", "24k"),
+                    # Add metadata
+                    "-metadata", f"metadata={json.dumps(self.metadata)}"
+                ]
+            )
+
+            return file_path
+
+        finally:
+            # No need to restart the stream as we're typically done by now
+            pass
 
 def generate_histogram(fft_values: np.ndarray, width: int = 12) -> str:
     """Generate a text-based histogram from FFT values."""

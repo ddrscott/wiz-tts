@@ -69,8 +69,9 @@ SHELL
 ### Options
 
 ```
-usage: wiz-tts [-h] [--voice {alloy,echo,fable,onyx,nova,shimmer,coral}] [--instructions INSTRUCTIONS] 
-               [--model {tts-1,tts-1-hd,gpt-4o-mini-tts}] [--data-dir DATA_DIR] [text]
+usage: wiz-tts [-h] [--voice {alloy,echo,fable,onyx,nova,shimmer,coral}] [--instructions INSTRUCTIONS]
+               [--model {tts-1,tts-1-hd,gpt-4o-mini-tts}] [--data-dir DATA_DIR] [--split {period,paragraph}]
+               [text]
 
 Convert text to speech with visualization
 
@@ -85,6 +86,8 @@ options:
                         Instructions for the speech style
   --model {tts-1,tts-1-hd,gpt-4o-mini-tts}, -m {tts-1,tts-1-hd,gpt-4o-mini-tts}
                         TTS model to use (default: tts-1)
+  --split {period,paragraph}
+                        Split input text by periods or paragraphs and add natural pauses
   --data-dir DATA_DIR, -d DATA_DIR
                         Directory to save audio files and metadata (default: $WIZ_TTS_DATA_DIR if set)
   --bitrate BITRATE, -b BITRATE
@@ -123,7 +126,17 @@ Processing a text file:
 cat story.txt | uv run -- wiz-tts --voice echo
 ```
 
-Saving audio to a directory (files are saved as soon as they start generating):
+Splitting text by sentences with natural pauses:
+```bash
+uv run -- wiz-tts --split period "First sentence. Second sentence. And a third one!"
+```
+
+Splitting text by paragraphs with longer pauses:
+```bash
+cat essay.txt | uv run -- wiz-tts --split paragraph --voice verse
+```
+
+Saving audio to a directory (files are saved as they start generating):
 ```bash
 uv run -- wiz-tts "Save this speech to a file" --data-dir ./saved_audio
 ```
@@ -154,6 +167,7 @@ uv run -- wiz-tts "Compressed audio" --data-dir ./saved_audio --bitrate 16k
 - Custom speech style instructions
 - Reads text from command line arguments or stdin
 - Supports multiple TTS models
+- Text splitting with natural pauses between segments
 - Option to save generated audio as WebM files with metadata and configurable compression
 - Saves metadata and audio files immediately as they're being generated (no need to wait for completion)
 
