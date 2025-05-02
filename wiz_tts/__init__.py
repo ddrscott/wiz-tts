@@ -3,4 +3,4 @@
 A simple CLI tool for text-to-speech using OpenAI's API with real-time FFT visualization.
 """
 
-__version__ = "0.4.2"
+__version__ = "0.5.0"
