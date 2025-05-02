@@ -13,7 +13,7 @@ from rich.table import Table
 
 from wiz_tts.tts import TextToSpeech
 from wiz_tts.audio import AudioPlayer
-from wiz_tts.voices import VOICE_ADAPTERS, GROQ_VOICES, OPENAI_VOICES
+from wiz_tts.voices import VOICE_ADAPTERS, GROQ_VOICES, OPENAI_VOICES, MODEL_OVERRIDES
 
 console = Console()
 audio_player = None
@@ -25,20 +25,24 @@ def signal_handler(sig, frame):
         console.print("\n[bold red]Playback interrupted![/]")
         # Don't call sys.exit() immediately - allow for cleanup
         audio_player.stop()
-        
+
         # If we have a data directory, make sure to finalize the audio
         if audio_player.data_dir:
             saved_path = audio_player.save_audio()
             if saved_path:
                 console.print(f"[green]Audio saved to:[/] {saved_path}")
-    
+
     sys.exit(0)
 
 async def async_main(text: str, voice: str = "coral", instructions: str = "", model: str = "tts-1", data_dir: Optional[str] = None, bitrate: str = "24k") -> None:
     """Main function to handle TTS generation and playback."""
     global audio_player
 
-    console.print(f"wiz-tts with model: {model}, voice: {voice}")
+    # Determine the actual model that will be used based on voice and model overrides
+    adapter_name = VOICE_ADAPTERS.get(voice)
+    actual_model = MODEL_OVERRIDES.get(adapter_name, model) if adapter_name else model
+
+    console.print(f"wiz-tts with model: {actual_model}, voice: {voice}")
 
     # Prepare data directory if provided
     data_path = Path(data_dir) if data_dir else None
@@ -54,7 +58,7 @@ async def async_main(text: str, voice: str = "coral", instructions: str = "", mo
         metadata = {
             "text": text,
             "voice": voice,
-            "model": model,
+            "model": actual_model,  # Use the actual model in metadata
             "instructions": instructions,
             "timestamp": time.time(),
             "date": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -84,10 +88,10 @@ async def async_main(text: str, voice: str = "coral", instructions: str = "", mo
                         status.update(f"Generating... ▶ {viz_data.get('histogram', '')}")
                     else:
                         status.update(f"[{viz_data['counter']}] ▶ {viz_data['histogram']}")
-            
+
             # Mark that we've received all chunks from the TTS API
             audio_player.mark_all_chunks_received()
-            
+
             # Drain the buffer to ensure all audio is played
             status.update(f"Completing playback...")
             await audio_player.drain_playback_buffer()
@@ -108,48 +112,48 @@ async def async_main(text: str, voice: str = "coral", instructions: str = "", mo
 def show_voices():
     """Display a list of configured voices and required environment variables."""
     console.print("[bold]Available TTS Voices[/]\n")
-    
+
     # Create a table for Groq voices
     groq_table = Table(title="Groq Voices (PlayAI-TTS)")
     groq_table.add_column("Voice", style="cyan")
-    
+
     # Add Groq voices to the table
     groq_voices = sorted([v for v in GROQ_VOICES])
     for voice in groq_voices:
         groq_table.add_row(voice)
-    
+
     # Create a table for OpenAI voices
     openai_table = Table(title="OpenAI Voices")
     openai_table.add_column("Voice", style="green")
     openai_table.add_column("Model", style="yellow")
-    
+
     # Add OpenAI voices to the table
     openai_voices = sorted([v for v in OPENAI_VOICES])
     for voice in openai_voices:
         openai_table.add_row(voice, "tts-1 / tts-1-hd / gpt-4o-mini-tts")
-    
+
     # Print the tables
     console.print(groq_table)
     console.print("\n")
     console.print(openai_table)
-    
+
     # Display warnings about required environment variables
     console.print("\n[bold yellow]Required Environment Variables:[/]")
-    
+
     # Check for OpenAI API key
     openai_key = os.environ.get("OPENAI_API_KEY")
     if openai_key:
         console.print("✅ [green]OPENAI_API_KEY is set[/] (required for OpenAI voices)")
     else:
         console.print("❌ [red]OPENAI_API_KEY is not set[/] (required for OpenAI voices)")
-    
+
     # Check for Groq API key
     groq_key = os.environ.get("GROQ_API_KEY")
     if groq_key:
         console.print("✅ [green]GROQ_API_KEY is set[/] (required for Groq voices)")
     else:
         console.print("❌ [red]GROQ_API_KEY is not set[/] (required for Groq voices)")
-    
+
     # Optional: Check for data directory
     data_dir = os.environ.get("WIZ_TTS_DATA_DIR")
     if data_dir:
@@ -171,7 +175,7 @@ def main():
 
     # Create argument parser
     parser = argparse.ArgumentParser(description="Convert text to speech with visualization")
-    
+
     # Add main arguments
     parser.add_argument("text", nargs="?", default=None,
                         help="Text to convert to speech (default: reads from stdin or uses a sample text)")
@@ -189,25 +193,25 @@ def main():
                         help="Directory to save audio files and metadata (default: $WIZ_TTS_DATA_DIR if set)")
     parser.add_argument("--bitrate", "-b", default="24k",
                         help="Audio bitrate for saved files (default: 24k)")
-                        
+
     # Add voices command as a flag
     parser.add_argument("--voices", action="store_true",
                         help="List available voices and check environment variables")
 
     # Parse arguments
     args = parser.parse_args()
-    
+
     # If no arguments provided at all, show help
     if len(sys.argv) == 1:
         parser.print_help()
         sys.exit(0)
-        
+
     # Handle --voices flag
     if args.voices:
         # Just show the voices and exit
         show_voices()
         return
-        
+
     # Default behavior: process the text argument for TTS
     text = args.text
     if text is None:
